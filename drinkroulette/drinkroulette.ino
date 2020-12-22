@@ -15,8 +15,7 @@
 #define BTN_IN_2 6
 #define BTN_IN_3 7
 
-#define BTN_USER_LEFT 11
-#define BTN_USER_RIGHT 10
+#define NUMUSERBUTTONS 1
 
 #define ENCODER_S1_PIN 11
 #define ENCODER_S2_PIN 10
@@ -33,14 +32,17 @@ Adafruit_NeoPixel pixels =
     Adafruit_NeoPixel(NUMPIXELS, LEDPIN, NEO_GRB + NEO_KHZ800);
 
 bool buttons[16] = {0};  // buttons for detecting shotglasses
-int user_inputs[3] = {0, 0, 0};  // current reqading from user input buttons
-int user_inputs_FP[3] = {0, 0, 0};  
-int last_user_inputs[3] = {0, 0, 0}; // used for debouncing button inputs
+int user_inputs[NUMUSERBUTTONS] = {0};  // current reading from user input buttons 0: select
+int user_inputs_FP[NUMUSERBUTTONS] = {0};  
+int last_user_inputs[NUMUSERBUTTONS] = {0}; // used for debouncing button inputs
 
-unsigned long user_inputs_last_debounce[3] = {};
+int rot_encoder_diff = 0;
+int last_diff = 0;
+
+unsigned long user_inputs_last_debounce[NUMUSERBUTTONS] = {};
 unsigned long debounce_delay = 1; //debounce time
 
-int last_diff = 0;
+
 
 int current_state = -1;
 int next_state = 0;
@@ -64,9 +66,11 @@ int dt = 0;
 void setup() {
   Serial.begin(9600);
   pixels.begin();
-  
+
+  // set +5v pin for inc sensor
   pinMode(13, OUTPUT);
   digitalWrite(13, HIGH);
+
   
   setPinModes();
 }
@@ -77,12 +81,7 @@ void loop() {
   statemachine();
   animation_update();
   
-  int diff = 0;
-  if((diff = enc.get_diffPosition()) != 0) //If value is updated
-  {
-    player_pos[0] -= diff * 22.5;
-    last_diff = diff;
-  }
+
 
 }
 
@@ -192,25 +191,26 @@ void animation_state_0() {
 
 void animation_state_2() {
   
-  // check for flank at user input wheel for adjusting position
-  if (user_inputs_FP[0] == HIGH) {
-   player_pos[0] += 22.5 ;
-  }
-  if (user_inputs_FP[1] == HIGH) {
-   player_pos[0] -= 22.5 ;
-    if (player_pos[0] < 0) {
-        double pp = 360. + player_pos[0];
-      player_pos[0] = pp;
-    }
-  }
-  player_pos[0] = fmod(player_pos[0], 360.);  
+ 
+
   
   // Draw Background
   for (int n = 0; n < NUMPIXELS; n++) {
-    led_colors[n][0] = background_keycolor[0];
-    led_colors[n][1] = background_keycolor[1];
-    led_colors[n][2] = background_keycolor[2]; 
+    pixel_buffer_rgb[n][0] = background_keycolor[0];
+    pixel_buffer_rgb[n][1] = background_keycolor[1];
+    pixel_buffer_rgb[n][2] = background_keycolor[2]; 
   }
+   rgb2hsv_buffer();
+   for (int n = 0; n < NUMPIXELS; n++) {
+    pixel_buffer_hsv[n][0] *= 0.5 + (0.2 * sin((n * (6.2/NUMPIXELS)) + 0.03 * t_anim));
+  }
+  hsv2rgb_buffer();
+  for (int n = 0; n < NUMPIXELS; n++) {
+    led_colors[n][0] = pixel_buffer_rgb[n][0];
+    led_colors[n][1] = pixel_buffer_rgb[n][1];
+    led_colors[n][2] = pixel_buffer_rgb[n][2]; 
+  }  
+  
   // mapping angle 0-360 to int led position 0-16
   int pos_p1 = int((player_pos[0] / 360.) * 16);
   
@@ -249,21 +249,32 @@ void print_debug_info() {
 }
 
 void buttons_update() {
-   int n_user_buttons = 3;
   
   // reset flank varaibles
-  for (int bt=0; bt < n_user_buttons; bt++){
+  for (int bt=0; bt < NUMUSERBUTTONS; bt++){
     user_inputs_FP[bt] = 0;
   }
   
-  // read user input buttons 0:left 1:right 2:select
-  bool reading_inp[3];
+  if((rot_encoder_diff = enc.get_diffPosition()) != 0){ //If value is updated
+    
+    double new_pos = (rot_encoder_diff * 22.5) + player_pos[0];
+    if (new_pos >= 360.){
+      player_pos[0] = new_pos - 360.;
+    }
+    else if (new_pos < 0.){
+      player_pos[0] = new_pos + 360.;
+    }
+    else {
+     player_pos[0] = new_pos ;
+    }
+    Serial.println(player_pos[0]);
+    last_diff = rot_encoder_diff;
+  }
+  // read user input buttons 0: select
+  bool reading_inp[NUMUSERBUTTONS];
+  reading_inp[0] = digitalRead(BTN_USER_SELECT);
   
-  reading_inp[0] = digitalRead(BTN_USER_LEFT);
-  reading_inp[1] = digitalRead(BTN_USER_RIGHT);
-  reading_inp[2] = digitalRead(BTN_USER_SELECT);
-  
-  for (int bt=0; bt < n_user_buttons; bt++){
+  for (int bt=0; bt < NUMUSERBUTTONS; bt++){
     // debouncing
     if (reading_inp[bt] != last_user_inputs[bt]) {
       user_inputs_last_debounce[bt] = time;
@@ -303,6 +314,7 @@ void buttons_update() {
 
 
 void setPinModes() {
+  /*
   pinMode(BTN_OUT_0, OUTPUT);
   pinMode(BTN_OUT_1, OUTPUT);
   pinMode(BTN_OUT_2, OUTPUT);
@@ -312,9 +324,9 @@ void setPinModes() {
   pinMode(BTN_IN_1, INPUT);
   pinMode(BTN_IN_2, INPUT);
   pinMode(BTN_IN_3, INPUT);
-
-  pinMode(BTN_USER_LEFT, INPUT);
-  pinMode(BTN_USER_RIGHT, INPUT);
+*/
+  pinMode(ENCODER_S1_PIN, INPUT);
+  pinMode(ENCODER_S2_PIN, INPUT);
   pinMode(BTN_USER_SELECT, INPUT);
 }
 
